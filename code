@@ -1,0 +1,103 @@
+STEP 1 : pip install -qq -U diffusers==0.11.1 transformers ftfy gradio accelerate
+STEP 2: !pip install torch
+import torch
+STEP 3:
+from huggingface_hub import notebook_login
+notebook_login()
+STEP 4 : 
+!pip install "jax[cuda12_pip]==0.4.23" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+STEP 5 :
+!pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
+STEP 6 :
+!pip install diffusers transformers
+!pip install moviepy
+STEP 7 :
+!pip install diffusers
+STEP 8 :
+!nvidia-smi
+
+
+STEP 9 :
+
+import cv2
+import numpy as np
+import torch
+from diffusers import StableDiffusionInpaintPipeline
+from moviepy.editor import VideoFileClip
+from PIL import Image
+
+def preprocess_video(video_file_path, margin_percentage=10):
+    video_capture = cv2.VideoCapture(video_file_path)
+    frame_width = int(video_capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    inpainting_margin_width = 0
+    frame_list = []
+    mask_list = []
+    
+    while True:
+        ret, frame = video_capture.read()
+        if not ret:
+            break
+        
+        inpainting_margin_width = int(margin_percentage / 100 * frame_width)
+        mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
+        mask[:, :inpainting_margin_width] = 1
+        mask[:, -inpainting_margin_width:] = 1
+
+        frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        mask_pil = Image.fromarray(mask * 255)
+
+        target_size = (512, 512)
+        frame_pil_resized = frame_pil.resize(target_size, Image.ANTIALIAS)
+        mask_pil_resized = mask_pil.resize(target_size, Image.ANTIALIAS)
+
+        frame_list.append(frame_pil_resized)
+        mask_list.append(mask_pil_resized)
+
+    video_capture.release()
+    return frame_list, mask_list, frame_width, frame_height, inpainting_margin_width
+
+def inpaint_image(frame_pil, mask_pil, inpaint_pipeline, inpainting_margin_width):
+    inpainted_frame_pil = frame_pil.copy()
+    prompt = "Fill in the blank areas on the left and right sides of the image. Ensure that the inpainted regions seamlessly integrate with the existing content, maintaining visual coherence. Pay special attention to details such as textures, colors, and patterns to achieve a natural and realistic result."
+
+    target_size = (512, 512)
+    inpainted_frame_pil = inpainted_frame_pil.resize(target_size, Image.ANTIALIAS)
+    mask_pil = mask_pil.resize(target_size, Image.ANTIALIAS)
+
+    try:
+        guidance_scale = 7.5
+        num_samples = 1
+        generator = torch.Generator(device="cuda").manual_seed(0)
+        inpainted_images = inpaint_pipeline(prompt=prompt, image=inpainted_frame_pil, mask_image=mask_pil, guidance_scale=guidance_scale, generator=generator, num_images_per_prompt=num_samples).images
+        inpainted_image_pil = inpainted_images[0]
+        inpainted_image_pil.show()
+    except Exception as e:
+        print(f"Error during inpainting: {e}")
+    return inpainted_image_pil
+
+def upscale_and_postprocess(frame_pil, target_width, target_height):
+    upscaled_frame_pil = frame_pil.resize((target_width, target_height), Image.BICUBIC)
+    return upscaled_frame_pil
+
+def convert_video(input_video_path, output_video_path):
+    frame_list, mask_list, original_frame_width, original_frame_height, inpainting_margin_width = preprocess_video(input_video_path)
+    target_width = 1280
+    target_height = 720
+
+    device = "cuda"
+    model_path = "runwayml/stable-diffusion-inpainting"
+    inpaint_pipeline = StableDiffusionInpaintPipeline.from_pretrained(model_path, torch_dtype=torch.float16).to(device)
+
+    processed_frame_list = []
+    for frame_pil, mask_pil in zip(frame_list, mask_list):
+        inpainted_frame_pil = inpaint_image(frame_pil, mask_pil.copy(), inpaint_pipeline, inpainting_margin_width)
+        processed_frame_list.append(inpainted_frame_pil)
+
+    clip = VideoFileClip(input_video_path)
+    output_clip = clip.set_duration(len(processed_frame_list) / clip.fps).resize((target_width, target_height))
+    output_clip.write_videofile(output_video_path, codec='libx264', audio_codec='aac', fps=clip.fps)
+
+input_video_file_path = "/content/v_YoYo_g24_c03.avi"
+output_video_file_path = "/content/full_output.mp4"
+convert_video(input_video_file_path, output_video_file_path)
