@@ -98,6 +98,6 @@ def convert_video(input_video_path, output_video_path):
     output_clip = clip.set_duration(len(processed_frame_list) / clip.fps).resize((target_width, target_height))
     output_clip.write_videofile(output_video_path, codec='libx264', audio_codec='aac', fps=clip.fps)
 
-input_video_file_path = "/content/v_YoYo_g24_c03.avi"
+input_video_file_path = "/contentRain Drops Slow Motion (640x480).mp4"
 output_video_file_path = "/content/full_output.mp4"
 convert_video(input_video_file_path, output_video_file_path)
